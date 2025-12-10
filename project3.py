@@ -24,12 +24,10 @@ class Header:
         magic = data[0:8]
         if magic != MAGIC:
             raise ValueError("Invalid magic")
-        root_block = int.from_bytes(data[8:16], "big", signed=False)
-        next_block = int.from_bytes(data[16:24], "big", signed=False)
         h = Header()
         h.magic = magic
-        h.root_block = root_block
-        h.next_block = next_block
+        h.root_block = int.from_bytes(data[8:16], "big", signed=False)
+        h.next_block = int.from_bytes(data[16:24], "big", signed=False)
         return h
 
     def to_bytes(self):
@@ -70,18 +68,15 @@ class Node:
         offset += 8
         keys = []
         for _ in range(MAX_KEYS):
-            k = int.from_bytes(data[offset:offset + 8], "big", signed=False)
-            keys.append(k)
+            keys.append(int.from_bytes(data[offset:offset + 8], "big", signed=False))
             offset += 8
         values = []
         for _ in range(MAX_KEYS):
-            v = int.from_bytes(data[offset:offset + 8], "big", signed=False)
-            values.append(v)
+            values.append(int.from_bytes(data[offset:offset + 8], "big", signed=False))
             offset += 8
         children = []
         for _ in range(MAX_CHILDREN):
-            c = int.from_bytes(data[offset:offset + 8], "big", signed=False)
-            children.append(c)
+            children.append(int.from_bytes(data[offset:offset + 8], "big", signed=False))
             offset += 8
         n = Node(block_id=stored_block_id, parent_id=parent_id)
         n.num_keys = num_keys
@@ -136,9 +131,7 @@ class NodeCache:
         self.order.insert(0, block_id)
 
     def _evict_if_needed(self):
-        if len(self.cache) <= 3:
-            return
-        while len(self.cache) > 3:
+        while len(self.cache) >= 3:
             victim = self.order.pop()
             node = self.cache.pop(victim)
             if node.dirty:
@@ -149,16 +142,14 @@ class NodeCache:
             node = self.cache[block_id]
             self._touch(block_id)
             return node
-        if len(self.cache) >= 3:
-            self._evict_if_needed()
+        self._evict_if_needed()
         node = Node.read(self.f, block_id)
         self.cache[block_id] = node
         self._touch(block_id)
         return node
 
     def new_node(self, block_id, parent_id):
-        if len(self.cache) >= 3:
-            self._evict_if_needed()
+        self._evict_if_needed()
         node = Node(block_id=block_id, parent_id=parent_id)
         self.cache[block_id] = node
         self._touch(block_id)
@@ -172,7 +163,6 @@ class NodeCache:
 
 class BTree:
     def __init__(self, filename, must_exist):
-        self.filename = filename
         mode = "r+b" if must_exist else "w+b"
         if must_exist and not os.path.exists(filename):
             raise ValueError("Index file does not exist")
@@ -226,8 +216,8 @@ class BTree:
             new_root_id = self.header.next_block
             self.header.next_block += 1
             new_root = self.cache.new_node(new_root_id, 0)
-            new_root.num_keys = 0
             new_root.children[0] = root.block_id
+            new_root.num_keys = 0
             root.parent_id = new_root_id
             root.dirty = True
             self.header.root_block = new_root_id
@@ -243,20 +233,13 @@ class BTree:
         self.header.next_block += 1
         new_child = self.cache.new_node(new_child_id, parent.block_id)
         mid = T - 1
-        new_child.num_keys = MAX_KEYS - T
-        for j in range(new_child.num_keys):
+        new_child.num_keys = T - 1
+        for j in range(T - 1):
             new_child.keys[j] = old_child.keys[j + T]
             new_child.values[j] = old_child.values[j + T]
         if not old_child.is_leaf():
-            for j in range(MAX_KEYS - T + 1):
+            for j in range(T):
                 new_child.children[j] = old_child.children[j + T]
-        for j in range(mid, MAX_KEYS):
-            if j >= mid:
-                old_child.keys[j] = 0
-                old_child.values[j] = 0
-        if not old_child.is_leaf():
-            for j in range(T, MAX_CHILDREN):
-                old_child.children[j] = 0
         old_child.num_keys = mid
         for j in range(parent.num_keys, i, -1):
             parent.children[j + 1] = parent.children[j]
@@ -264,10 +247,10 @@ class BTree:
         for j in range(parent.num_keys - 1, i - 1, -1):
             parent.keys[j + 1] = parent.keys[j]
             parent.values[j + 1] = parent.values[j]
-        parent.keys[i] = old_child.keys[mid]
-        parent.values[i] = old_child.values[mid]
-        old_child.keys[mid] = 0
-        old_child.values[mid] = 0
+        promote_key = old_child.keys[mid]
+        promote_value = old_child.values[mid]
+        parent.keys[i] = promote_key
+        parent.values[i] = promote_value
         parent.num_keys += 1
         parent.dirty = True
         old_child.dirty = True
